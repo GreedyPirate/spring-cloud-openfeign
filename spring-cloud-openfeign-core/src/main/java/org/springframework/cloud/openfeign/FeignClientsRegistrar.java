@@ -85,7 +85,7 @@ class FeignClientsRegistrar
 		if (!StringUtils.hasText(name)) {
 			return "";
 		}
-
+		//这个host只是用来做校验
 		String host = null;
 		try {
 			String url;
@@ -144,17 +144,26 @@ class FeignClientsRegistrar
 		registerFeignClients(metadata, registry);
 	}
 
+	/**
+	 * 这个方法用来注册一个默认的bean：FeignClientSpecification，name为default.com.ttyc.xxMainApplication，
+	 * 但这不是beanName，registerClientConfiguration会在拼接一个".FeignClientSpecification"的后缀
+	 * update：默认就是defaultConfiguration，全局的Feign配置
+	 */
 	private void registerDefaultConfiguration(AnnotationMetadata metadata,
 			BeanDefinitionRegistry registry) {
+		// 拿到EnableFeignClients注解的配置项
 		Map<String, Object> defaultAttrs = metadata
 				.getAnnotationAttributes(EnableFeignClients.class.getName(), true);
 
+		// 肯定包含defaultConfiguration啊
 		if (defaultAttrs != null && defaultAttrs.containsKey("defaultConfiguration")) {
 			String name;
+			// 有没有标注在内部类上
 			if (metadata.hasEnclosingClass()) {
 				name = "default." + metadata.getEnclosingClassName();
 			}
 			else {
+				// name = default.com.ttyc.xxMainApplication
 				name = "default." + metadata.getClassName();
 			}
 			registerClientConfiguration(registry, name,
@@ -180,6 +189,7 @@ class FeignClientsRegistrar
 			basePackages = getBasePackages(metadata);
 		}
 		else {
+			// @EnableFeignClients可以设置clients属性，如果设置了FeignClient类，就以它所在包为路径扫描
 			final Set<String> clientClasses = new HashSet<>();
 			basePackages = new HashSet<>();
 			for (Class<?> clazz : clients) {
@@ -198,20 +208,26 @@ class FeignClientsRegistrar
 		}
 
 		for (String basePackage : basePackages) {
+			// 扫描包下所有类，把满足TypeFilter的类解析为BeanDefinition返回
+			// 通常情况下scanner只addIncludeFilter一个annotationTypeFilter
+			// TypeFilter: AnnotationTypeFilter过滤有FeignClient注解的类
 			Set<BeanDefinition> candidateComponents = scanner
 					.findCandidateComponents(basePackage);
 			for (BeanDefinition candidateComponent : candidateComponents) {
 				if (candidateComponent instanceof AnnotatedBeanDefinition) {
 					// verify annotated class is an interface
 					AnnotatedBeanDefinition beanDefinition = (AnnotatedBeanDefinition) candidateComponent;
+					// 获取FeignClient类上的所有注解及其配置项，除了@FeignClient，还会有别的注解
 					AnnotationMetadata annotationMetadata = beanDefinition.getMetadata();
 					Assert.isTrue(annotationMetadata.isInterface(),
 							"@FeignClient can only be specified on an interface");
 
+					// 单独获取@FeignClient的配置项
 					Map<String, Object> attributes = annotationMetadata
 							.getAnnotationAttributes(
 									FeignClient.class.getCanonicalName());
 
+					// 从attributes中获取@FeignClient的name
 					String name = getClientName(attributes);
 					registerClientConfiguration(registry, name,
 							attributes.get("configuration"));
@@ -232,6 +248,7 @@ class FeignClientsRegistrar
 		definition.addPropertyValue("path", getPath(attributes));
 		String name = getName(attributes);
 		definition.addPropertyValue("name", name);
+		// contextId新版本加入的，用于自定义bean的别名，以前总是用name作为别名
 		String contextId = getContextId(attributes);
 		definition.addPropertyValue("contextId", contextId);
 		definition.addPropertyValue("type", className);
@@ -240,6 +257,7 @@ class FeignClientsRegistrar
 		definition.addPropertyValue("fallbackFactory", attributes.get("fallbackFactory"));
 		definition.setAutowireMode(AbstractBeanDefinition.AUTOWIRE_BY_TYPE);
 
+		// 设置bean的别名
 		String alias = contextId + "FeignClient";
 		AbstractBeanDefinition beanDefinition = definition.getBeanDefinition();
 
@@ -250,9 +268,11 @@ class FeignClientsRegistrar
 
 		String qualifier = getQualifier(attributes);
 		if (StringUtils.hasText(qualifier)) {
+			// qualifier属性也是新加的，它会覆盖contextId的别名
 			alias = qualifier;
 		}
 
+		// 类全名来作为beanName来注册bean
 		BeanDefinitionHolder holder = new BeanDefinitionHolder(beanDefinition, className,
 				new String[] { alias });
 		BeanDefinitionReaderUtils.registerBeanDefinition(holder, registry);
@@ -266,6 +286,9 @@ class FeignClientsRegistrar
 		validateFallbackFactory(annotation.getClass("fallbackFactory"));
 	}
 
+	/**
+	 * 依次从3个属性里获取，serviceId已经被废弃了，这里是兼容
+	 */
 	/* for testing */ String getName(Map<String, Object> attributes) {
 		String name = (String) attributes.get("serviceId");
 		if (!StringUtils.hasText(name)) {
@@ -320,32 +343,42 @@ class FeignClientsRegistrar
 			}
 		};
 	}
-
+	/**
+	 * 获取扫码包的路径
+	 * @param importingClassMetadata
+	 * @return
+	 */
 	protected Set<String> getBasePackages(AnnotationMetadata importingClassMetadata) {
 		Map<String, Object> attributes = importingClassMetadata
 				.getAnnotationAttributes(EnableFeignClients.class.getCanonicalName());
 
 		Set<String> basePackages = new HashSet<>();
+		// 从@EnableFeignClients中获取要扫描的包
+		// 1.直接配置了value
 		for (String pkg : (String[]) attributes.get("value")) {
 			if (StringUtils.hasText(pkg)) {
 				basePackages.add(pkg);
 			}
 		}
+		// 2.直接配置了basePackages
 		for (String pkg : (String[]) attributes.get("basePackages")) {
 			if (StringUtils.hasText(pkg)) {
 				basePackages.add(pkg);
 			}
 		}
+		// 3. 获取指定类所在的包，通常写一个空接口，则该接口所在包下所有类都会被扫描，暂时没想过这样用
 		for (Class<?> clazz : (Class[]) attributes.get("basePackageClasses")) {
 			basePackages.add(ClassUtils.getPackageName(clazz));
 		}
 
+		// 4. 要是都没有，就获取标注@EnableFeignClients的类所在的包，通常也就是xxMainApplication
 		if (basePackages.isEmpty()) {
 			basePackages.add(
 					ClassUtils.getPackageName(importingClassMetadata.getClassName()));
 		}
 		return basePackages;
 	}
+
 
 	private String getQualifier(Map<String, Object> client) {
 		if (client == null) {
@@ -358,6 +391,9 @@ class FeignClientsRegistrar
 		return null;
 	}
 
+	/**
+	 * 依次从4个配置里获取服务名称，常用的就是value和name
+	 */
 	private String getClientName(Map<String, Object> client) {
 		if (client == null) {
 			return null;
@@ -380,6 +416,14 @@ class FeignClientsRegistrar
 				+ FeignClient.class.getSimpleName());
 	}
 
+	/**
+	 * 构建BeanDefinition，并用BeanDefinitionRegistry注册
+	 * 但是从registerFeignClients方法的for循环中，是把每一个FeignClient都注册成同一个类型的bean
+	 * 而它们的类型都是FeignClientSpecification
+	 *
+	 * update：这是在注册每一个FeignClient的configuration，比如自定义请求和响应的处理类
+	 * 而这个bean就是FeignClientSpecification
+	 */
 	private void registerClientConfiguration(BeanDefinitionRegistry registry, Object name,
 			Object configuration) {
 		BeanDefinitionBuilder builder = BeanDefinitionBuilder
