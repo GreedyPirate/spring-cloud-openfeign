@@ -85,7 +85,7 @@ class FeignClientsRegistrar
 		if (!StringUtils.hasText(name)) {
 			return "";
 		}
-		//这个host只是用来做校验
+		// 这个host只是用来做校验
 		String host = null;
 		try {
 			String url;
@@ -343,6 +343,7 @@ class FeignClientsRegistrar
 			}
 		};
 	}
+
 	/**
 	 * 获取扫码包的路径
 	 * @param importingClassMetadata
@@ -378,7 +379,6 @@ class FeignClientsRegistrar
 		}
 		return basePackages;
 	}
-
 
 	private String getQualifier(Map<String, Object> client) {
 		if (client == null) {
